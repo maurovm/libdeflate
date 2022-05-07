@@ -78,6 +78,9 @@ compute_barrett_reduction_constant(void)
 int
 main(void)
 {
+	size_t chunk_size = 16384;
+	int i;
+
 	printf("\t/* Constants precomputed by gen_crc32_multipliers.c.  "
 	       "Do not edit! */\n");
 
@@ -103,6 +106,12 @@ main(void)
 	printf("\tconst __v2di barrett_reduction_constants =\n"
 	       "\t\t\t(__v2di){ 0x%016"PRIX64", 0x%016"PRIX64" };\n",
 	       compute_barrett_reduction_constant(), CRCPOLY_FULL);
+
+	printf("#define CHUNK_SIZE %zu\n", chunk_size);
+	for (i = 1; i <= 3; i++) {
+		printf("#define CHUNK_MULTIPLIER%d 0x%08X\n", i,
+		       compute_multiplier(chunk_size * i * 8));
+	}
 
 	return 0;
 }

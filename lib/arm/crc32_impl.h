@@ -72,6 +72,29 @@
 #endif
 #include <arm_acle.h>
 
+/*#define CHUNK_SIZE 4096*/
+/*#define CHUNK_MULTIPLIER1 0x09FE548F*/
+/*#define CHUNK_MULTIPLIER2 0x83852D0F*/
+/*#define CHUNK_MULTIPLIER3 0xE4B54665*/
+
+#define CHUNK_SIZE 16384
+#define CHUNK_MULTIPLIER1 0x30362F1A
+#define CHUNK_MULTIPLIER2 0x7B5A9CC3
+#define CHUNK_MULTIPLIER3 0xEC735CEA
+
+static u32 mul_modG(u32 a, u32 b)
+{
+	u32 result = 0;
+	int i;
+
+	for (i = 0; i < 32; i++, a <<= 1) {
+		if (a & 0x80000000)
+			result ^= b;
+		b = (b >> 1) ^ ((b & 1) ? 0xEDB88320 : 0);
+	}
+	return result;
+}
+
 static u32 ATTRIBUTES
 crc32_arm(u32 remainder, const u8 *p, size_t size)
 {
@@ -79,6 +102,61 @@ crc32_arm(u32 remainder, const u8 *p, size_t size)
 		remainder = __crc32b(remainder, *p++);
 		size--;
 	}
+
+#define NUM_CHUNKS 4
+
+#if NUM_CHUNKS > 1
+	while (size >= NUM_CHUNKS * CHUNK_SIZE) {
+		u32 remainder2 = 0;
+		u32 remainder3 = 0;
+		u32 remainder4 = 0;
+		const u8 *p2 = p+CHUNK_SIZE;
+		const u8 *p3 = p+2*CHUNK_SIZE;
+#if NUM_CHUNKS == 4
+		const u8 *p4 = p+3*CHUNK_SIZE;
+#endif
+		const u8 *end = p + CHUNK_SIZE;
+		do {
+			u64 v0a = le64_bswap(*((u64 *)p));
+			u64 v0b = le64_bswap(*((u64 *)(p+8)));
+			u64 v1a = le64_bswap(*((u64 *)p2));
+			u64 v1b = le64_bswap(*((u64 *)(p2+8)));
+			u64 v2a = le64_bswap(*((u64 *)p3));
+			u64 v2b = le64_bswap(*((u64 *)(p3+8)));
+#if NUM_CHUNKS==4
+			u64 v3a = le64_bswap(*((u64 *)p4));
+			u64 v3b = le64_bswap(*((u64 *)(p4+8)));
+#endif
+
+			remainder = __crc32d(remainder, v0a);
+			remainder = __crc32d(remainder, v0b);
+			remainder2 = __crc32d(remainder2, v1a);
+			remainder2 = __crc32d(remainder2, v1b);
+			remainder3 = __crc32d(remainder3, v2a);
+			remainder3 = __crc32d(remainder3, v2b);
+#if NUM_CHUNKS==4
+			remainder4 = __crc32d(remainder4, v3a);
+			remainder4 = __crc32d(remainder4, v3b);
+#endif
+			p += 16;
+			p2 += 16;
+			p3 += 16;
+			p4 += 16;
+		} while (p != end);
+		p += (NUM_CHUNKS-1)*CHUNK_SIZE;
+#if NUM_CHUNKS == 4
+		remainder = mul_modG(remainder, CHUNK_MULTIPLIER3) ^
+			    mul_modG(remainder2, CHUNK_MULTIPLIER2) ^
+			    mul_modG(remainder3, CHUNK_MULTIPLIER1) ^
+			    remainder4;
+#else
+		remainder = mul_modG(remainder, CHUNK_MULTIPLIER2) ^
+			    mul_modG(remainder2, CHUNK_MULTIPLIER1) ^
+			    remainder3;
+#endif
+		size -= NUM_CHUNKS * CHUNK_SIZE;
+	}
+#endif /* NUM_CHUNKS > 1 */
 
 	while (size >= 32) {
 		remainder = __crc32d(remainder, le64_bswap(*((u64 *)p + 0)));
