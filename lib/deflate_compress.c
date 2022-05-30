@@ -389,10 +389,10 @@ struct deflate_sequence {
 	u32 litrunlen_and_length;
 
 	/*
-	 * If 'length' doesn't indicate end-of-block, then this is the offset of
-	 * the match which follows the literals.
+	 * If 'length' doesn't indicate end-of-block, then this is the extra
+	 * offset bits of the match which follows the literals.
 	 */
-	u16 offset;
+	u16 extra_offset_bits;
 
 	/*
 	 * If 'length' doesn't indicate end-of-block, then this is the length
@@ -1592,12 +1592,12 @@ deflate_precompute_huffman_header(struct libdeflate_compressor *c)
 }
 
 /* Write a match to the output buffer. */
-#define WRITE_MATCH(codes_, length_, length_slot_, offset_, offset_slot_) \
+#define WRITE_MATCH(codes_, length_, length_slot_, extra_offset_bits_, offset_slot_) \
 do {									\
 	const struct deflate_codes *codes__ = (codes_);			\
 	unsigned length__ = (length_);					\
 	unsigned length_slot__ = (length_slot_);			\
-	unsigned offset__ = (offset_);					\
+	unsigned extra_offset_bits__ = (extra_offset_bits_);		\
 	unsigned offset_slot__ = (offset_slot_);			\
 	unsigned litlen_symbol__ = DEFLATE_FIRST_LEN_SYM + length_slot__; \
 									\
@@ -1626,7 +1626,7 @@ do {									\
 		FLUSH_BITS();						\
 									\
 	/* Extra offset bits */						\
-	ADD_BITS(offset__ - deflate_offset_slot_base[offset_slot__],	\
+	ADD_BITS(extra_offset_bits__,					\
 		 deflate_extra_offset_bits[offset_slot__]);		\
 									\
 	FLUSH_BITS();							\
@@ -1868,9 +1868,13 @@ deflate_flush_block(struct libdeflate_compressor *c,
 				FLUSH_BITS();
 			} else {
 				/* Match */
+				unsigned offset_slot =
+					c->p.n.offset_slot_full[offset];
+
 				WRITE_MATCH(codes, length,
-					    deflate_length_slot[length], offset,
-					    c->p.n.offset_slot_full[offset]);
+					    deflate_length_slot[length],
+					    offset - deflate_offset_slot_base[offset_slot],
+					    offset_slot);
 			}
 			cur_node += length;
 		} while (cur_node != end_node);
@@ -1936,7 +1940,7 @@ deflate_flush_block(struct libdeflate_compressor *c,
 
 			/* Output a match. */
 			WRITE_MATCH(codes, length, seq->length_slot,
-				    seq->offset, seq->offset_slot);
+				    seq->extra_offset_bits, seq->offset_slot);
 			in_next += length;
 		}
 	}
@@ -2166,7 +2170,7 @@ deflate_choose_match(struct libdeflate_compressor *c,
 		observe_match(&c->split_stats, length);
 
 	seq->litrunlen_and_length |= (u32)length << SEQ_LENGTH_SHIFT;
-	seq->offset = offset;
+	seq->extra_offset_bits = offset - deflate_offset_slot_base[offset_slot];
 	seq->length_slot = length_slot;
 	seq->offset_slot = offset_slot;
 
